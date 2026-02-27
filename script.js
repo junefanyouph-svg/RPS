@@ -55,6 +55,7 @@ function buildBracket() {
     const pair = document.createElement('div');
     pair.className = 'card-pair';
 
+    // CPU on top
     const compCard = document.createElement('div');
     compCard.className = 'game-card empty';
     compCard.id = `comp_${r}`;
@@ -64,6 +65,12 @@ function buildBracket() {
     vs.className = 'vs-divider';
     vs.textContent = 'VS';
     pair.appendChild(vs);
+
+    // YOU on bottom
+    const youLabel = document.createElement('div');
+    youLabel.className = 'card-owner-label you-label';
+    youLabel.textContent = 'YOU';
+    pair.appendChild(youLabel);
 
     const playerCard = document.createElement('div');
     playerCard.className = 'game-card empty';
@@ -187,8 +194,12 @@ function placeBet() {
 
 function setChoiceButtons(enabled) {
   ['btnRock', 'btnPaper', 'btnScissors'].forEach(id => {
-    document.getElementById(id).disabled = !enabled;
+    const btn = document.getElementById(id);
+    // Never use disabled — it swallows click events so the "place a bet" float won't fire
+    btn.classList.toggle('btn-inactive', !enabled);
   });
+  const hint = document.getElementById('choiceHint');
+  if (hint) hint.textContent = enabled ? '👆 Pick your move' : '⏳ Waiting...';
 }
 
 function setCashOutButton(enabled) {
@@ -200,9 +211,13 @@ function setCashOutButton(enabled) {
 }
 
 function playerChoose(choice) {
-  if (!gameActive || !waitingForChoice) return;
+  if (!gameActive || !waitingForChoice) {
+    if (!gameActive) showNoBetFloat(choice);
+    return;
+  }
   waitingForChoice = false;
   setChoiceButtons(false);
+  setCashOutButton(false); // disable while round is resolving
 
   const btnMap = { rock: 'btnRock', paper: 'btnPaper', scissors: 'btnScissors' };
   const btn = document.getElementById(btnMap[choice]);
@@ -220,17 +235,30 @@ function resolveChoice(choice) {
   const playerCard = document.getElementById(`player_${currentRound}`);
   const compCard   = document.getElementById(`comp_${currentRound}`);
 
-  setTimeout(() => {
-    compCard.textContent = EMOJIS[compChoice];
-    compCard.className = `game-card ${result === 'win' ? 'lose' : result === 'lose' ? 'win' : 'empty'} reveal-anim`;
-  }, 200);
-
+  // Step 1 — Player reveals their hand first (200ms)
   setTimeout(() => {
     playerCard.textContent = EMOJIS[choice];
-    playerCard.className = `game-card ${result === 'win' ? 'win win-anim' : result === 'lose' ? 'lose' : 'empty'} reveal-anim`;
-  }, 400);
+    playerCard.className = 'game-card player-revealed reveal-anim';
+    // CPU card shows suspense while player's hand is visible
+    compCard.textContent = '⏳';
+    compCard.className = 'game-card cpu-waiting';
+    const hint = document.getElementById('choiceHint');
+    if (hint) hint.textContent = '👀 CPU is thinking...';
+  }, 200);
 
+  // Step 2 — CPU reveals (950ms — clear suspense gap after player)
   setTimeout(() => {
+    compCard.textContent = EMOJIS[compChoice];
+    compCard.className = 'game-card reveal-anim';
+    const hint = document.getElementById('choiceHint');
+    if (hint) hint.textContent = '⚡ Result incoming...';
+  }, 950);
+
+  // Step 3 — Apply win/lose colours + bounce on tie (1300ms)
+  setTimeout(() => {
+    playerCard.className = `game-card ${result === 'win' ? 'win win-anim' : result === 'lose' ? 'lose' : 'empty'} reveal-anim`;
+    compCard.className   = `game-card ${result === 'win' ? 'lose' : result === 'lose' ? 'win' : 'empty'} reveal-anim`;
+
     if (result === 'tie') {
       compCard.className = 'game-card tie';
       void compCard.offsetWidth;
@@ -239,9 +267,11 @@ function resolveChoice(choice) {
       void playerCard.offsetWidth;
       playerCard.className = 'game-card tie card-bounce';
     }
+    const hint = document.getElementById('choiceHint');
+    if (hint) hint.textContent = result === 'win' ? '🏆 You won this round!' : result === 'lose' ? '💔 CPU wins this round' : '🤝 Tie!';
     if (autoMode) processAutoRoundResult(result, choice, compChoice);
     else          processRoundResult(result, choice, compChoice);
-  }, 800);
+  }, 1300);
 }
 
 function getResult(player, computer) {
@@ -277,10 +307,12 @@ function processRoundResult(result, playerChoice, compChoice) {
       const payout = betAmount * MULTIPLIERS[TOTAL_ROUNDS - 1];
       updateBalance(balance + payout);
       endGame();
+      showFloatingPayout(currentRound, payout);
       updatePayoutBar(payout, MULTIPLIERS[TOTAL_ROUNDS - 1], '🏆 Full bracket won!', true);
       showGameOver(true, payout, MULTIPLIERS[TOTAL_ROUNDS - 1]);
     } else {
       showResultBanner('✅ +' + mult + 'x — Keep going or Cash Out!', false, 'resultBanner');
+      showFloatingPayout(currentRound, betAmount * mult);
       currentRound++;
       const nextMult = MULTIPLIERS[currentRound];
       updatePayoutBar(betAmount * nextMult, nextMult,
@@ -357,7 +389,8 @@ function cashOut() {
   const payout = currentRound > 0 ? betAmount * mult : betAmount;
   updateBalance(balance + payout);
   endGame();
-  showGameOver(true, payout, mult, true);
+  showToast('💰 Cashed out +$' + payout.toFixed(2) + ' (' + mult + 'x)', 'win');
+  setTimeout(() => resetToStart(), 1800);
 }
 
 function endGame() {
@@ -367,24 +400,18 @@ function endGame() {
 }
 
 function showGameOver(won, amount, mult, cashout = false) {
-  const overlay = document.getElementById('gameoverOverlay');
-  const box     = document.getElementById('gameoverBox');
-  box.className = `gameover-box ${won ? 'win-box' : 'lose-box'}`;
-  document.getElementById('gameoverIcon').textContent   = won ? '🏆' : '💔';
-  document.getElementById('gameoverTitle').textContent  = cashout ? 'Cashed Out!' : (won ? 'You Won!' : 'You Lost!');
-  document.getElementById('gameoverAmount').textContent = won
-    ? `+$${amount.toFixed(2)}`
-    : `-$${betAmount.toFixed(2)}`;
-  overlay.classList.add('show');
+  if (won) {
+    const label = cashout ? '💰 Cashed out' : '🏆 You won';
+    showToast(label + ' +$' + amount.toFixed(2) + ' (' + mult + 'x)', 'win');
+  } else {
+    showToast('💔 You lost -$' + betAmount.toFixed(2), 'lose');
+  }
+  setTimeout(() => resetToStart(), 2200);
 }
 
 function closeGameOver() {
-  document.getElementById('gameoverOverlay').classList.remove('show');
-  if (autoRunning) {
-    resetAutoToConfig();
-  } else {
-    resetToStart();
-  }
+  if (autoRunning) resetAutoToConfig();
+  else resetToStart();
 }
 
 function resetToStart() {
@@ -519,6 +546,7 @@ function processAutoRoundResult(result, playerChoice, compChoice) {
       autoBetsPlayed++;
       updateBalance(balance + payout);
       updateAutoStats();
+      showFloatingPayout(currentRound, payout);
       showResultBanner('🏆 +' + MULTIPLIERS[TOTAL_ROUNDS-1] + 'x — Full win!', false, 'autoResultBanner');
       endGame();
 
@@ -532,6 +560,7 @@ function processAutoRoundResult(result, playerChoice, compChoice) {
 
     } else {
       // Won this round — continue to next round automatically
+      showFloatingPayout(currentRound, betAmount * mult);
       currentRound++;
       highlightCurrentRound();
       scrollToCurrent();
@@ -588,14 +617,13 @@ function finishAuto() {
   setChoiceButtons(false);
 
   const won = autoNetProfit >= 0;
-  const overlay = document.getElementById('gameoverOverlay');
-  const box     = document.getElementById('gameoverBox');
-  box.className = `gameover-box ${won ? 'win-box' : 'lose-box'}`;
-  document.getElementById('gameoverIcon').textContent   = won ? '📊' : '📉';
-  document.getElementById('gameoverTitle').textContent  = 'Auto Complete';
-  document.getElementById('gameoverAmount').textContent =
-    (autoNetProfit >= 0 ? '+' : '-') + '$' + Math.abs(autoNetProfit).toFixed(2);
-  overlay.classList.add('show');
+  const sign = autoNetProfit >= 0 ? '+' : '-';
+  showToast(
+    (won ? '📊 Auto done: ' : '📉 Auto done: ') + sign + '$' + Math.abs(autoNetProfit).toFixed(2) +
+    '  (' + autoWins + 'W / ' + autoLosses + 'L)',
+    won ? 'win' : 'lose'
+  );
+  setTimeout(() => resetAutoToConfig(), 2500);
 }
 
 function resetAutoToConfig() {
@@ -643,6 +671,60 @@ function resetPayoutBar() {
   if (potMeta) { potMeta.textContent = 'Place a bet to start'; }
   if (curAmt)  { curAmt.textContent = '—';  curAmt.classList.remove('locked', 'active', 'payout-pop'); }
   if (curMeta) { curMeta.textContent = 'No active bet'; }
+}
+
+// ─── Toast Notification ──────────────────────────────────────────────────────
+function showToast(msg, type = 'win') {
+  // Remove any existing toast first
+  const existing = document.getElementById('gameToast');
+  if (existing) existing.remove();
+
+  const toast = document.createElement('div');
+  toast.id = 'gameToast';
+  toast.className = 'game-toast game-toast-' + type;
+  toast.textContent = msg;
+  document.getElementById('bracketContainer').prepend(toast);
+
+  // Auto remove after animation
+  toast.addEventListener('animationend', () => toast.remove());
+}
+
+// ─── Floating Payout Text ────────────────────────────────────────────────────
+function showFloatingPayout(roundIndex, amount) {
+  const badge = document.getElementById('mult_' + roundIndex);
+  if (!badge) return;
+
+  const el = document.createElement('div');
+  el.className = 'floating-payout';
+  el.textContent = '+$' + amount.toFixed(2);
+
+  // Position relative to the badge
+  const badgeRect = badge.getBoundingClientRect();
+  el.style.left = (badgeRect.left + badgeRect.width / 2) + 'px';
+  el.style.top  = (badgeRect.top + window.scrollY) + 'px';
+  document.body.appendChild(el);
+
+  // Auto-remove after animation completes
+  el.addEventListener('animationend', () => el.remove());
+}
+
+// ─── No Bet Float ────────────────────────────────────────────────────────────
+function showNoBetFloat(choice) {
+  const btnMap = { rock: 'btnRock', paper: 'btnPaper', scissors: 'btnScissors' };
+  const btn = document.getElementById(btnMap[choice]);
+  if (!btn) return;
+
+  // Don't stack duplicates
+  if (document.querySelector('.no-bet-float')) return;
+
+  const rect = btn.getBoundingClientRect();
+  const el = document.createElement('div');
+  el.className = 'no-bet-float';
+  el.textContent = '⚠ Place a bet first!';
+  el.style.left = (rect.left + rect.width / 2) + 'px';
+  el.style.top  = (rect.top + window.scrollY) + 'px';
+  document.body.appendChild(el);
+  el.addEventListener('animationend', () => el.remove());
 }
 
 // ─── Mobile Sidebar ──────────────────────────────────────────────────────────

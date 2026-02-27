@@ -181,10 +181,16 @@
     </div>
 
     <!-- Choice buttons -->
-    <div class="choice-row">
-      <button class="choice-btn" id="btnRock"     onclick="playerChoose('rock')"     title="Rock">✊</button>
-      <button class="choice-btn" id="btnPaper"    onclick="playerChoose('paper')"    title="Paper">🖐</button>
-      <button class="choice-btn" id="btnScissors" onclick="playerChoose('scissors')" title="Scissors">✌️</button>
+    <div class="choice-section">
+      <div class="choice-section-header">
+        <span class="choice-you-badge">👤 Your Hand</span>
+        <span class="choice-hint" id="choiceHint">Pick your move</span>
+      </div>
+      <div class="choice-row">
+        <button class="choice-btn" id="btnRock" onclick="playerChoose('rock')" title="Rock">✊<span class="choice-label">Rock</span></button>
+        <button class="choice-btn" id="btnPaper"    onclick="playerChoose('paper')"    title="Paper">🖐<span class="choice-label">Paper</span></button>
+        <button class="choice-btn" id="btnScissors" onclick="playerChoose('scissors')" title="Scissors">✌️<span class="choice-label">Scissors</span></button>
+      </div>
     </div>
   </div>
 
@@ -194,15 +200,7 @@
 <button class="mobile-sidebar-toggle" id="mobileSidebarToggle" onclick="toggleMobileSidebar()">☰</button>
 <div class="mobile-sidebar-backdrop" id="mobileSidebarBackdrop" onclick="closeMobileSidebar()"></div>
 
-<!-- GAME OVER OVERLAY -->
-<div class="gameover-overlay" id="gameoverOverlay">
-  <div class="gameover-box" id="gameoverBox">
-    <div class="gameover-icon"   id="gameoverIcon"></div>
-    <div class="gameover-title"  id="gameoverTitle"></div>
-    <div class="gameover-amount" id="gameoverAmount"></div>
-    <button class="gameover-btn" onclick="closeGameOver()">Play Again</button>
-  </div>
-</div>
+<!-- Game over overlay removed — toasts used instead -->
 
 <script src="script.js"></script>
 </body>
