@@ -119,6 +119,11 @@ function doubleBet(inputId = 'betInput') {
   input.value = (parseFloat(input.value) * 2).toFixed(2);
 }
 
+function maxBet(inputId = 'betInput') {
+  const input = document.getElementById(inputId);
+  input.value = Math.max(1.00, balance).toFixed(2);
+}
+
 function updateBalance(newBal) {
   balance = newBal;
   ['balanceDisplay','sidebarBalance','autoSidebarBalance','autoBalanceLive'].forEach(id => {
@@ -176,6 +181,7 @@ function placeBet() {
     return;
   }
   clearInputError('betInput', 'betError');
+  closeMobileSidebar();
   startRound(betAmount, false);
 }
 
@@ -637,6 +643,25 @@ function resetPayoutBar() {
   if (potMeta) { potMeta.textContent = 'Place a bet to start'; }
   if (curAmt)  { curAmt.textContent = '—';  curAmt.classList.remove('locked', 'active', 'payout-pop'); }
   if (curMeta) { curMeta.textContent = 'No active bet'; }
+}
+
+// ─── Mobile Sidebar ──────────────────────────────────────────────────────────
+function toggleMobileSidebar() {
+  const sidebar  = document.getElementById('sidebar');
+  const backdrop = document.getElementById('mobileSidebarBackdrop');
+  const isOpen   = sidebar.classList.contains('mobile-open');
+  if (isOpen) closeMobileSidebar();
+  else        openMobileSidebar();
+}
+
+function openMobileSidebar() {
+  document.getElementById('sidebar').classList.add('mobile-open');
+  document.getElementById('mobileSidebarBackdrop').classList.add('show');
+}
+
+function closeMobileSidebar() {
+  document.getElementById('sidebar').classList.remove('mobile-open');
+  document.getElementById('mobileSidebarBackdrop').classList.remove('show');
 }
 
 // ─── Input Error Helpers ─────────────────────────────────────────────────────
