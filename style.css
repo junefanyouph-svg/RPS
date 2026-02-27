@@ -207,7 +207,10 @@ input[type="number"]:focus { border-color: var(--blue); }
 
 .btn-primary {
   width: 100%;
-  background: var(--blue);
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #1b6ef3 0%, #3a8bff 40%, #1b6ef3 60%, #0d4fcf 100%);
+  background-size: 200% 200%;
   border: none;
   border-radius: 10px;
   padding: 14px;
@@ -216,16 +219,78 @@ input[type="number"]:focus { border-color: var(--blue); }
   font-weight: 700;
   color: white;
   cursor: pointer;
-  transition: all 0.2s;
-  letter-spacing: 0.5px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  box-shadow: 0 4px 18px rgba(27,110,243,0.5), 0 0 0 0 rgba(58,139,255,0.4);
+  animation: placeBetPulse 2.4s ease-in-out infinite;
+  transition: transform 0.15s, box-shadow 0.15s;
 }
-.btn-primary:hover { background: var(--blue-bright); transform: translateY(-1px); }
+
+/* Shiny sweep overlay */
+.btn-primary::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -75%;
+  width: 50%;
+  height: 100%;
+  background: linear-gradient(
+    120deg,
+    transparent 0%,
+    rgba(255,255,255,0.08) 40%,
+    rgba(255,255,255,0.35) 50%,
+    rgba(255,255,255,0.08) 60%,
+    transparent 100%
+  );
+  animation: shineSweep 2.4s ease-in-out infinite;
+  pointer-events: none;
+}
+
+/* Subtle top edge glint */
+.btn-primary::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
+  pointer-events: none;
+}
+
+@keyframes shineSweep {
+  0%   { left: -75%; }
+  60%  { left: 125%; }
+  100% { left: 125%; }
+}
+
+@keyframes placeBetPulse {
+  0%, 100% {
+    box-shadow: 0 4px 18px rgba(27,110,243,0.5), 0 0 0 0 rgba(58,139,255,0.4);
+    background-position: 0% 50%;
+  }
+  50% {
+    box-shadow: 0 6px 28px rgba(27,110,243,0.7), 0 0 0 6px rgba(58,139,255,0);
+    background-position: 100% 50%;
+  }
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px) scale(1.02);
+  box-shadow: 0 8px 32px rgba(27,110,243,0.7);
+}
+.btn-primary:active {
+  transform: translateY(0px) scale(0.98);
+}
 .btn-primary:disabled {
   background: #1a2a3a;
   color: var(--text-dim);
   cursor: not-allowed;
   transform: none;
+  animation: none;
+  box-shadow: none;
 }
+.btn-primary:disabled::before { display: none; }
 
 .btn-secondary {
   width: 100%;
