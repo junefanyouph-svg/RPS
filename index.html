@@ -22,41 +22,140 @@
 
   <!-- SIDEBAR -->
   <div class="sidebar">
+
+    <!-- TAB ROW -->
     <div class="tab-row">
-      <button class="tab-btn active">Manual</button>
-      <button class="tab-btn">Auto</button>
+      <button class="tab-btn active" id="tabManual" onclick="switchTab('manual')">Manual</button>
+      <button class="tab-btn"        id="tabAuto"   onclick="switchTab('auto')">Auto</button>
     </div>
 
-    <div id="preGamePanel">
-      <div class="label">Bet Amount</div>
-      <div class="bet-input-row">
-        <div class="bet-input-wrap">
-          <span class="prefix">$</span>
-          <input type="number" id="betInput" value="1.00" step="0.50" min="0.50">
+    <!-- ══ MANUAL PANEL ══ -->
+    <div id="manualPanel">
+
+      <!-- Pre-game -->
+      <div id="preGamePanel">
+        <div class="label">Bet Amount</div>
+        <div id="betError" class="input-error"></div>
+        <div class="bet-input-row">
+          <div class="bet-input-wrap">
+            <span class="prefix">$</span>
+            <input type="number" id="betInput" value="1.00" step="0.50" min="1.00">
+          </div>
+          <button class="half-btn" onclick="halveBet()">½</button>
+          <button class="double-btn" onclick="doubleBet()">2×</button>
         </div>
-        <button class="half-btn" onclick="halveBet()">½</button>
-        <button class="double-btn" onclick="doubleBet()">2×</button>
+        <br>
+        <button class="btn-primary" onclick="placeBet()">Place Bet</button>
+        <br><br>
+        <div class="info-text">Balance: $<span id="sidebarBalance">100.00</span></div>
       </div>
-      <br>
-      <button class="btn-primary" onclick="placeBet()">Place Bet</button>
-      <br><br>
-      <div class="info-text">Balance: $<span id="sidebarBalance">100.00</span></div>
+
+      <!-- In-game -->
+      <div id="inGamePanel" style="display:none;">
+        <div id="resultBanner" class="result-banner"></div>
+        <button class="btn-secondary" onclick="randomBet()">🎲 Random</button>
+        <button class="btn-cashout" id="cashOutBtn" onclick="cashOut()">💰 Cash Out</button>
+        <div class="info-text">Bet: $<span id="betAmountDisplay">0.00</span></div>
+      </div>
+
     </div>
 
-    <div id="inGamePanel" style="display:none;">
-      <div class="payout-box">
-        <div class="payout-row">
-          <span class="payout-label">Payout</span>
-          <span class="payout-multiplier" id="currentMultDisplay">1×</span>
+    <!-- ══ AUTO PANEL ══ -->
+    <div id="autoPanel" style="display:none;">
+
+      <!-- Config (shown before auto starts) -->
+      <div id="autoConfigPanel">
+
+        <div class="label">Bet Amount</div>
+        <div id="autoBetError" class="input-error"></div>
+        <div class="bet-input-row">
+          <div class="bet-input-wrap">
+            <span class="prefix">$</span>
+            <input type="number" id="autoBetInput" value="1.00" step="0.50" min="1.00">
+          </div>
+          <button class="half-btn" onclick="halveBet('autoBetInput')">½</button>
+          <button class="double-btn" onclick="doubleBet('autoBetInput')">2×</button>
         </div>
-        <div class="payout-amount" id="currentPayoutDisplay">$0.00</div>
+
+        <br>
+
+        <div class="label">Number of Bets</div>
+        <div class="bet-input-row">
+          <div class="bet-input-wrap" style="flex:1">
+            <input type="number" id="autoRoundsInput" value="10" min="1" max="999"
+                   style="padding-left:12px;">
+          </div>
+          <button class="half-btn" onclick="document.getElementById('autoRoundsInput').value=
+            Math.max(1,Math.floor(+document.getElementById('autoRoundsInput').value/2))">½</button>
+          <button class="double-btn" onclick="document.getElementById('autoRoundsInput').value=
+            Math.min(999,+document.getElementById('autoRoundsInput').value*2)">2×</button>
+        </div>
+
+        <br>
+
+        <div class="label">Pick Strategy</div>
+        <div class="strategy-row">
+          <button class="strategy-btn active" id="strat_random"   onclick="setStrategy('random')">🎲 Random</button>
+          <button class="strategy-btn"        id="strat_rock"     onclick="setStrategy('rock')">✊ Rock</button>
+          <button class="strategy-btn"        id="strat_paper"    onclick="setStrategy('paper')">🖐 Paper</button>
+          <button class="strategy-btn"        id="strat_scissors" onclick="setStrategy('scissors')">✌️ Scissors</button>
+        </div>
+
+        <br>
+
+        <div class="label">Stop Conditions</div>
+        <div class="toggle-row">
+          <label class="toggle-label">
+            <input type="checkbox" id="stopOnWin"> Stop on Win
+          </label>
+        </div>
+        <div class="toggle-row">
+          <label class="toggle-label">
+            <input type="checkbox" id="stopOnLose" checked> Stop on Loss
+          </label>
+        </div>
+
+        <br>
+        <button class="btn-primary" onclick="startAuto()">▶ Start Auto</button>
+        <br><br>
+        <div class="info-text">Balance: $<span id="autoSidebarBalance">100.00</span></div>
       </div>
-      <div id="resultBanner" class="result-banner"></div>
-      <button class="btn-secondary" onclick="randomBet()">🎲 Random</button>
-      <button class="btn-cashout"   onclick="cashOut()">💰 Cash Out</button>
-      <div class="info-text">Bet: $<span id="betAmountDisplay">0.00</span></div>
+
+      <!-- Running state -->
+      <div id="autoRunPanel" style="display:none;">
+        <div class="payout-box">
+          <div class="payout-row">
+            <span class="payout-label">Bet / Round</span>
+            <span class="payout-multiplier" id="autoCurrentRound">0 / 0</span>
+          </div>
+          <div class="payout-amount" id="autoNetDisplay">$0.00</div>
+          <div style="font-size:12px;color:var(--text-dim);margin-top:4px;">Net Profit</div>
+        </div>
+
+        <div class="auto-stats">
+          <div class="stat-cell">
+            <div class="stat-val" id="autoWins">0</div>
+            <div class="stat-key">Wins</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val loss" id="autoLosses">0</div>
+            <div class="stat-key">Losses</div>
+          </div>
+          <div class="stat-cell">
+            <div class="stat-val" id="autoTies">0</div>
+            <div class="stat-key">Ties</div>
+          </div>
+        </div>
+
+        <div id="autoResultBanner" class="result-banner"></div>
+
+        <button class="btn-stop" id="stopAutoBtn" onclick="stopAuto()">⏹ Stop Auto</button>
+        <div class="info-text" style="margin-top:6px;">Balance: $<span id="autoBalanceLive">100.00</span></div>
+      </div>
+
     </div>
-  </div>
+
+  </div><!-- /sidebar -->
 
   <!-- GAME AREA -->
   <div class="game-area">
@@ -68,12 +167,25 @@
       <div class="fairplay">Fair Play</div>
     </div>
 
-    <!-- Horizontal bracket -->
+    <!-- Payout Counter Bar -->
+    <div class="payout-bar" id="payoutBar">
+      <div class="payout-bar-col">
+        <div class="payout-bar-label">Current Payout</div>
+        <div class="payout-bar-amount" id="currentPayoutBar">—</div>
+        <div class="payout-bar-meta" id="currentMultBar">No active bet</div>
+      </div>
+      <div class="payout-bar-divider"></div>
+      <div class="payout-bar-col">
+        <div class="payout-bar-label">Potential Payout</div>
+        <div class="payout-bar-amount" id="payoutBarAmount">—</div>
+        <div class="payout-bar-meta" id="payoutBarMeta">Place a bet to start</div>
+      </div>
+    </div>
+
     <div class="bracket-container" id="bracketContainer">
       <div class="bracket-track" id="bracketTrack"></div>
     </div>
 
-    <!-- Pick buttons -->
     <div class="choice-row">
       <button class="choice-btn" id="btnRock"     onclick="playerChoose('rock')"     title="Rock">✊</button>
       <button class="choice-btn" id="btnPaper"    onclick="playerChoose('paper')"    title="Paper">🖐</button>

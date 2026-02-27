@@ -5,48 +5,66 @@ const CHOICES      = ['rock', 'paper', 'scissors'];
 const EMOJIS       = { rock: '✊', paper: '🖐', scissors: '✌️' };
 
 // ─── Game State ───────────────────────────────────────────────────────────────
-let balance        = 100.00;
-let betAmount      = 0;
-let currentRound   = 0;
-let roundResults   = [];
-let gameActive     = false;
+let balance          = 100.00;
+let betAmount        = 0;
+let currentRound     = 0;
+let roundResults     = [];
+let gameActive       = false;
 let waitingForChoice = false;
+let roundsPlayed     = 0;
 
-// ─── Bracket Builder (horizontal) ────────────────────────────────────────────
+// ─── Auto State ───────────────────────────────────────────────────────────────
+let autoMode         = false;
+let autoRunning      = false;   // true from startAuto → finishAuto (survives between bets)
+let autoStrategy     = 'random';
+let autoTotalBets    = 10;
+let autoBetsPlayed   = 0;
+let autoWins         = 0;
+let autoLosses       = 0;
+let autoTies         = 0;
+let autoNetProfit    = 0;
+let autoStopOnWin    = false;
+let autoStopOnLoss   = true;
+let autoStopRequested = false;  // user pressed Stop
+let autoStartBalance = 0;
+let autoSeq          = 0;       // increments each startAuto/stop cycle — orphan guard
+
+// ─── Tab switching ───────────────────────────────────────────────────────────
+function switchTab(tab) {
+  document.getElementById('tabManual').classList.toggle('active', tab === 'manual');
+  document.getElementById('tabAuto').classList.toggle('active', tab === 'auto');
+  document.getElementById('manualPanel').style.display = tab === 'manual' ? 'block' : 'none';
+  document.getElementById('autoPanel').style.display   = tab === 'auto'   ? 'block' : 'none';
+}
+
+// ─── Bracket Builder ─────────────────────────────────────────────────────────
 function buildBracket() {
   const track = document.getElementById('bracketTrack');
   track.innerHTML = '';
-
   for (let r = 0; r < TOTAL_ROUNDS; r++) {
-    // ── Column ──
     const col = document.createElement('div');
     col.className = 'round-col';
     col.id = `roundCol_${r}`;
 
-    // Multiplier badge
     const badge = document.createElement('div');
     badge.className = 'mult-badge';
     badge.id = `mult_${r}`;
     badge.textContent = `${MULTIPLIERS[r]}x`;
     col.appendChild(badge);
 
-    // Card pair wrapper
     const pair = document.createElement('div');
     pair.className = 'card-pair';
 
-    // Computer card (top)
     const compCard = document.createElement('div');
     compCard.className = 'game-card empty';
     compCard.id = `comp_${r}`;
     pair.appendChild(compCard);
 
-    // VS divider
     const vs = document.createElement('div');
     vs.className = 'vs-divider';
     vs.textContent = 'VS';
     pair.appendChild(vs);
 
-    // Player card (bottom)
     const playerCard = document.createElement('div');
     playerCard.className = 'game-card empty';
     playerCard.id = `player_${r}`;
@@ -55,7 +73,6 @@ function buildBracket() {
     col.appendChild(pair);
     track.appendChild(col);
 
-    // ── Arrow connector (between columns, not after last) ──
     if (r < TOTAL_ROUNDS - 1) {
       const arrow = document.createElement('div');
       arrow.className = 'h-connector';
@@ -75,25 +92,17 @@ function highlightCurrentRound() {
     col.classList.remove('active', 'done');
     badge.classList.remove('active', 'passed');
 
-    if (r < currentRound) {
-      col.classList.add('done');
-      badge.classList.add('passed');
-    } else if (r === currentRound) {
-      col.classList.add('active');
-      badge.classList.add('active');
-    }
+    if (r < currentRound)        { col.classList.add('done');   badge.classList.add('passed'); }
+    else if (r === currentRound) { col.classList.add('active'); badge.classList.add('active'); }
 
-    // Connectors
     if (r < TOTAL_ROUNDS - 1) {
       const conn = document.getElementById(`conn_${r}`);
       if (!conn) continue;
       conn.classList.remove('passed', 'active');
-      if (r < currentRound)      conn.classList.add('passed');
+      if (r < currentRound)        conn.classList.add('passed');
       else if (r === currentRound) conn.classList.add('active');
     }
   }
-
-  // Mark current round cards as "waiting"
   const pc = document.getElementById(`player_${currentRound}`);
   const cc = document.getElementById(`comp_${currentRound}`);
   if (pc) { pc.className = 'game-card current'; pc.textContent = '?'; }
@@ -101,48 +110,73 @@ function highlightCurrentRound() {
 }
 
 // ─── Bet Controls ─────────────────────────────────────────────────────────────
-function halveBet() {
-  const input = document.getElementById('betInput');
-  input.value = Math.max(0.50, parseFloat(input.value) / 2).toFixed(2);
+function halveBet(inputId = 'betInput') {
+  const input = document.getElementById(inputId);
+  input.value = Math.max(1.00, parseFloat(input.value) / 2).toFixed(2);
 }
-
-function doubleBet() {
-  const input = document.getElementById('betInput');
+function doubleBet(inputId = 'betInput') {
+  const input = document.getElementById(inputId);
   input.value = (parseFloat(input.value) * 2).toFixed(2);
 }
 
 function updateBalance(newBal) {
   balance = newBal;
-  document.getElementById('balanceDisplay').textContent  = balance.toFixed(2);
-  document.getElementById('sidebarBalance').textContent  = balance.toFixed(2);
+  ['balanceDisplay','sidebarBalance','autoSidebarBalance','autoBalanceLive'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = balance.toFixed(2);
+  });
 }
 
-// ─── Game Flow ────────────────────────────────────────────────────────────────
-function placeBet() {
-  betAmount = parseFloat(document.getElementById('betInput').value);
-  if (isNaN(betAmount) || betAmount <= 0) return;
-  if (betAmount > balance) { alert('Insufficient balance!'); return; }
-
-  updateBalance(balance - betAmount);
+// ─── Shared round starter ─────────────────────────────────────────────────────
+function startRound(amount, isAuto) {
+  betAmount        = amount;
   currentRound     = 0;
   roundResults     = [];
+  roundsPlayed     = 0;
   gameActive       = true;
   waitingForChoice = true;
 
-  document.getElementById('preGamePanel').style.display = 'none';
-  const inGame = document.getElementById('inGamePanel');
-  inGame.style.cssText = 'display:flex; flex-direction:column; gap:14px;';
+  updateBalance(balance - betAmount);
 
-  document.getElementById('betAmountDisplay').textContent = betAmount.toFixed(2);
-  updatePayoutDisplay(1, betAmount);
+  if (!isAuto) {
+    document.getElementById('preGamePanel').style.display = 'none';
+    const inGame = document.getElementById('inGamePanel');
+    inGame.style.cssText = 'display:flex; flex-direction:column; gap:14px;';
+    document.getElementById('betAmountDisplay').textContent = betAmount.toFixed(2);
+    updatePayoutDisplay(1, betAmount);
+    setCashOutButton(false);
+    setChoiceButtons(true);
+    clearResultBanner('resultBanner');
+  } else {
+    setChoiceButtons(false);
+  }
 
-  setChoiceButtons(true);
-  clearResultBanner();
   buildBracket();
   highlightCurrentRound();
-
-  // Scroll bracket to the start
   document.getElementById('bracketContainer').scrollLeft = 0;
+  // Reset current payout to show bet amount (nothing locked in yet)
+  const curAmt  = document.getElementById('currentPayoutBar');
+  const curMeta = document.getElementById('currentMultBar');
+  if (curAmt)  { curAmt.textContent = '$' + betAmount.toFixed(2); curAmt.classList.remove('locked','active','payout-pop'); }
+  if (curMeta) { curMeta.textContent = 'Bet placed — win to lock in'; }
+
+  updatePayoutBar(betAmount * MULTIPLIERS[0], MULTIPLIERS[0],
+    'Win round 1 to earn ' + MULTIPLIERS[0] + 'x', true);
+}
+
+// ─── Manual flow ──────────────────────────────────────────────────────────────
+function placeBet() {
+  betAmount = parseFloat(document.getElementById('betInput').value);
+  if (isNaN(betAmount) || betAmount < 1) {
+    showInputError('betInput', 'betError', 'Minimum bet amount is $1.00');
+    return;
+  }
+  if (betAmount > balance) {
+    showInputError('betInput', 'betError', 'Not enough balance for this bet');
+    return;
+  }
+  clearInputError('betInput', 'betError');
+  startRound(betAmount, false);
 }
 
 function setChoiceButtons(enabled) {
@@ -151,17 +185,28 @@ function setChoiceButtons(enabled) {
   });
 }
 
+function setCashOutButton(enabled) {
+  const btn = document.getElementById('cashOutBtn');
+  if (!btn) return;
+  btn.disabled = !enabled;
+  btn.style.opacity = enabled ? '1' : '0.35';
+  btn.style.cursor  = enabled ? 'pointer' : 'not-allowed';
+}
+
 function playerChoose(choice) {
   if (!gameActive || !waitingForChoice) return;
   waitingForChoice = false;
   setChoiceButtons(false);
 
-  // Flash chosen button
   const btnMap = { rock: 'btnRock', paper: 'btnPaper', scissors: 'btnScissors' };
   const btn = document.getElementById(btnMap[choice]);
   btn.classList.add('selected');
   setTimeout(() => btn.classList.remove('selected'), 500);
 
+  resolveChoice(choice);
+}
+
+function resolveChoice(choice) {
   const compChoice = CHOICES[Math.floor(Math.random() * 3)];
   const result     = getResult(choice, compChoice);
   roundResults.push({ player: choice, computer: compChoice, result });
@@ -169,21 +214,28 @@ function playerChoose(choice) {
   const playerCard = document.getElementById(`player_${currentRound}`);
   const compCard   = document.getElementById(`comp_${currentRound}`);
 
-  // Reveal computer card first
   setTimeout(() => {
     compCard.textContent = EMOJIS[compChoice];
-    const compState = result === 'win' ? 'lose' : result === 'lose' ? 'win' : 'empty';
-    compCard.className = `game-card ${compState} reveal-anim`;
+    compCard.className = `game-card ${result === 'win' ? 'lose' : result === 'lose' ? 'win' : 'empty'} reveal-anim`;
   }, 200);
 
-  // Then player card
   setTimeout(() => {
     playerCard.textContent = EMOJIS[choice];
-    const playerState = result === 'win' ? 'win win-anim' : result === 'lose' ? 'lose' : 'empty';
-    playerCard.className = `game-card ${playerState} reveal-anim`;
+    playerCard.className = `game-card ${result === 'win' ? 'win win-anim' : result === 'lose' ? 'lose' : 'empty'} reveal-anim`;
   }, 400);
 
-  setTimeout(() => processRoundResult(result, choice, compChoice), 800);
+  setTimeout(() => {
+    if (result === 'tie') {
+      compCard.className = 'game-card tie';
+      void compCard.offsetWidth;
+      compCard.className = 'game-card tie card-bounce';
+      playerCard.className = 'game-card tie';
+      void playerCard.offsetWidth;
+      playerCard.className = 'game-card tie card-bounce';
+    }
+    if (autoMode) processAutoRoundResult(result, choice, compChoice);
+    else          processRoundResult(result, choice, compChoice);
+  }, 800);
 }
 
 function getResult(player, computer) {
@@ -196,20 +248,22 @@ function getResult(player, computer) {
   return 'lose';
 }
 
+// ─── Manual result handling ───────────────────────────────────────────────────
 function processRoundResult(result, playerChoice, compChoice) {
   if (result === 'tie') {
-    showResultBanner('🤝 Tie! Play again...', false);
+    redoResultBanner('🤝 Tie! Play again...', 'resultBanner');
     waitingForChoice = true;
     setChoiceButtons(true);
     return;
   }
+  roundsPlayed++;
 
   if (result === 'win') {
     const wonRounds = currentRound + 1;
     const mult = MULTIPLIERS[wonRounds - 1];
     updatePayoutDisplay(mult, betAmount * mult);
+    setCashOutButton(true);
 
-    // Mark connector as passed
     const conn = document.getElementById(`conn_${currentRound}`);
     if (conn) { conn.classList.remove('active'); conn.classList.add('passed'); }
 
@@ -217,22 +271,26 @@ function processRoundResult(result, playerChoice, compChoice) {
       const payout = betAmount * MULTIPLIERS[TOTAL_ROUNDS - 1];
       updateBalance(balance + payout);
       endGame();
+      updatePayoutBar(payout, MULTIPLIERS[TOTAL_ROUNDS - 1], '🏆 Full bracket won!', true);
       showGameOver(true, payout, MULTIPLIERS[TOTAL_ROUNDS - 1]);
     } else {
-      showResultBanner(`✅ +${mult}x — Keep going or Cash Out!`, false);
+      showResultBanner('✅ +' + mult + 'x — Keep going or Cash Out!', false, 'resultBanner');
       currentRound++;
+      const nextMult = MULTIPLIERS[currentRound];
+      updatePayoutBar(betAmount * nextMult, nextMult,
+        'Win round ' + (currentRound + 1) + ' to earn ' + nextMult + 'x', true);
       setTimeout(() => {
-        clearResultBanner();
+        clearResultBanner('resultBanner');
         highlightCurrentRound();
-        // Scroll to keep current column visible
         scrollToCurrent();
         waitingForChoice = true;
         setChoiceButtons(true);
       }, 1000);
     }
   } else {
-    showResultBanner(`❌ ${EMOJIS[compChoice]} beats ${EMOJIS[playerChoice]} — You lost!`, true);
+    showResultBanner('❌ ' + EMOJIS[compChoice] + ' beats ' + EMOJIS[playerChoice] + ' — You lost!', true, 'resultBanner');
     endGame();
+    updatePayoutBar(null, 0, '❌ Better luck next time', false);
     setTimeout(() => showGameOver(false, 0, 0), 800);
   }
 }
@@ -243,24 +301,43 @@ function scrollToCurrent() {
   col.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' });
 }
 
-// ─── UI Helpers ───────────────────────────────────────────────────────────────
 function updatePayoutDisplay(mult, amount) {
-  document.getElementById('currentMultDisplay').textContent  = `${mult}×`;
-  document.getElementById('currentPayoutDisplay').textContent = `$${amount.toFixed(2)}`;
+  // Update the "Current Payout" side of the top bar
+  const amountEl = document.getElementById('currentPayoutBar');
+  const metaEl   = document.getElementById('currentMultBar');
+  if (!amountEl || !metaEl) return;
+
+  amountEl.classList.remove('payout-pop', 'locked', 'active');
+  void amountEl.offsetWidth;
+  amountEl.textContent = '$' + amount.toFixed(2);
+  amountEl.classList.add('locked', 'payout-pop');
+  metaEl.textContent = mult + '× locked in';
 }
 
-function showResultBanner(msg, isLose) {
-  const banner = document.getElementById('resultBanner');
+function showResultBanner(msg, isLose, bannerId = 'resultBanner') {
+  const banner = document.getElementById(bannerId);
+  if (!banner) return;
   banner.textContent = msg;
   banner.className = `result-banner ${isLose ? 'lose' : 'win'}`;
 }
 
-function clearResultBanner() {
-  const banner = document.getElementById('resultBanner');
+function clearResultBanner(bannerId = 'resultBanner') {
+  const banner = document.getElementById(bannerId);
+  if (!banner) return;
   banner.className = 'result-banner';
   banner.textContent = '';
   banner.style.display = 'none';
   setTimeout(() => { banner.style.display = ''; }, 10);
+}
+
+function redoResultBanner(msg, bannerId = 'resultBanner') {
+  const banner = document.getElementById(bannerId);
+  if (!banner) return;
+  banner.className = 'result-banner';
+  banner.textContent = '';
+  void banner.offsetWidth;
+  banner.textContent = msg;
+  banner.className = 'result-banner win tie-pop';
 }
 
 function randomBet() {
@@ -287,9 +364,9 @@ function showGameOver(won, amount, mult, cashout = false) {
   const overlay = document.getElementById('gameoverOverlay');
   const box     = document.getElementById('gameoverBox');
   box.className = `gameover-box ${won ? 'win-box' : 'lose-box'}`;
-  document.getElementById('gameoverIcon').textContent    = won ? '🏆' : '💔';
-  document.getElementById('gameoverTitle').textContent   = cashout ? 'Cashed Out!' : (won ? 'You Won!' : 'You Lost!');
-  document.getElementById('gameoverAmount').textContent  = won
+  document.getElementById('gameoverIcon').textContent   = won ? '🏆' : '💔';
+  document.getElementById('gameoverTitle').textContent  = cashout ? 'Cashed Out!' : (won ? 'You Won!' : 'You Lost!');
+  document.getElementById('gameoverAmount').textContent = won
     ? `+$${amount.toFixed(2)}`
     : `-$${betAmount.toFixed(2)}`;
   overlay.classList.add('show');
@@ -297,13 +374,18 @@ function showGameOver(won, amount, mult, cashout = false) {
 
 function closeGameOver() {
   document.getElementById('gameoverOverlay').classList.remove('show');
-  resetToStart();
+  if (autoRunning) {
+    resetAutoToConfig();
+  } else {
+    resetToStart();
+  }
 }
 
 function resetToStart() {
   gameActive       = false;
   currentRound     = 0;
   roundResults     = [];
+  roundsPlayed     = 0;
   waitingForChoice = false;
 
   document.getElementById('inGamePanel').style.display  = 'none';
@@ -312,7 +394,271 @@ function resetToStart() {
 
   setChoiceButtons(false);
   buildBracket();
-  clearResultBanner();
+  clearResultBanner('resultBanner');
+  resetPayoutBar();
+}
+
+// ─── AUTO MODE ────────────────────────────────────────────────────────────────
+function setStrategy(s) {
+  autoStrategy = s;
+  ['random','rock','paper','scissors'].forEach(k => {
+    document.getElementById(`strat_${k}`).classList.toggle('active', k === s);
+  });
+}
+
+function startAuto() {
+  const amt = parseFloat(document.getElementById('autoBetInput').value);
+  if (isNaN(amt) || amt < 1) {
+    showInputError('autoBetInput', 'autoBetError', 'Minimum bet amount is $1.00');
+    return;
+  }
+  if (amt > balance) {
+    showInputError('autoBetInput', 'autoBetError', 'Not enough balance for this bet');
+    return;
+  }
+  clearInputError('autoBetInput', 'autoBetError');
+
+  autoTotalBets     = Math.max(1, parseInt(document.getElementById('autoRoundsInput').value) || 10);
+  autoStopOnWin     = document.getElementById('stopOnWin').checked;
+  autoStopOnLoss    = document.getElementById('stopOnLose').checked;
+  betAmount         = amt;
+  autoBetsPlayed    = 0;
+  autoWins          = 0;
+  autoLosses        = 0;
+  autoTies          = 0;
+  autoNetProfit     = 0;
+  autoStopRequested = false;
+  autoStartBalance  = balance;
+  autoMode          = true;
+  autoRunning       = true;
+  autoSeq++;                    // invalidate any orphaned callbacks from a previous run
+
+  document.getElementById('autoConfigPanel').style.display    = 'none';
+  const runPanel = document.getElementById('autoRunPanel');
+  runPanel.style.display        = 'flex';
+  runPanel.style.flexDirection  = 'column';
+  runPanel.style.gap            = '14px';
+
+  updateAutoStats();
+  runNextAutoBet(autoSeq);
+}
+
+function stopAuto() {
+  autoStopRequested = true;
+  document.getElementById('stopAutoBtn').disabled = true;
+  document.getElementById('stopAutoBtn').textContent = '⏳ Stopping...';
+  // If we're between bets (not mid-game), finish immediately
+  if (!gameActive) {
+    finishAuto();
+  }
+  // Otherwise finishAuto() will be called at the end of the current game
+}
+
+function runNextAutoBet(seq) {
+  // Orphan guard — if seq doesn't match current run, bail silently
+  if (seq !== autoSeq) return;
+  if (autoStopRequested || autoBetsPlayed >= autoTotalBets || balance < betAmount) {
+    finishAuto();
+    return;
+  }
+  updateAutoStats();
+  startRound(betAmount, true);
+  // Small delay so the bracket renders before auto picks
+  setTimeout(() => autoPickChoice(seq), 600);
+}
+
+function autoPickChoice(seq) {
+  if (seq !== autoSeq) return;
+  if (!gameActive || !waitingForChoice) return;
+  waitingForChoice = false;
+
+  const choice = autoStrategy === 'random'
+    ? CHOICES[Math.floor(Math.random() * 3)]
+    : autoStrategy;
+
+  const btnMap = { rock: 'btnRock', paper: 'btnPaper', scissors: 'btnScissors' };
+  const btn = document.getElementById(btnMap[choice]);
+  btn.classList.add('selected');
+  setTimeout(() => btn.classList.remove('selected'), 500);
+
+  resolveChoice(choice);
+}
+
+function processAutoRoundResult(result, playerChoice, compChoice) {
+  const seq = autoSeq; // capture at time of call
+
+  if (result === 'tie') {
+    autoTies++;
+    updateAutoStats();
+    redoResultBanner('🤝 Tie! Replaying...', 'autoResultBanner');
+    // Re-enable waitingForChoice then pick again
+    setTimeout(() => {
+      if (seq !== autoSeq) return;
+      waitingForChoice = true;
+      autoPickChoice(seq);
+    }, 900);
+    return;
+  }
+
+  if (result === 'win') {
+    const wonRounds = currentRound + 1;
+    const conn = document.getElementById(`conn_${currentRound}`);
+    if (conn) { conn.classList.remove('active'); conn.classList.add('passed'); }
+
+    if (wonRounds >= TOTAL_ROUNDS) {
+      // Full bracket win
+      const payout = betAmount * MULTIPLIERS[TOTAL_ROUNDS - 1];
+      autoNetProfit += payout - betAmount;
+      autoWins++;
+      autoBetsPlayed++;
+      updateBalance(balance + payout);
+      updateAutoStats();
+      showResultBanner('🏆 +' + MULTIPLIERS[TOTAL_ROUNDS-1] + 'x — Full win!', false, 'autoResultBanner');
+      endGame();
+
+      const shouldStop = autoStopRequested || autoStopOnWin || autoBetsPlayed >= autoTotalBets || balance < betAmount;
+      setTimeout(() => {
+        if (seq !== autoSeq) return;
+        clearResultBanner('autoResultBanner');
+        if (shouldStop) finishAuto();
+        else runNextAutoBet(seq);
+      }, 1200);
+
+    } else {
+      // Won this round — continue to next round automatically
+      currentRound++;
+      highlightCurrentRound();
+      scrollToCurrent();
+      showResultBanner('✅ Round ' + wonRounds + ' won — continuing...', false, 'autoResultBanner');
+      setTimeout(() => {
+        if (seq !== autoSeq) return;
+        clearResultBanner('autoResultBanner');
+        waitingForChoice = true;
+        setTimeout(() => autoPickChoice(seq), 400);
+      }, 800);
+    }
+
+  } else {
+    // Lost this game
+    autoNetProfit -= betAmount;
+    autoLosses++;
+    autoBetsPlayed++;
+    updateAutoStats();
+    showResultBanner('❌ ' + EMOJIS[compChoice] + ' beats ' + EMOJIS[playerChoice] + ' — Lost $' + betAmount.toFixed(2), true, 'autoResultBanner');
+    endGame();
+
+    const shouldStop = autoStopRequested || autoStopOnLoss || autoBetsPlayed >= autoTotalBets || balance < betAmount;
+    setTimeout(() => {
+      if (seq !== autoSeq) return;
+      clearResultBanner('autoResultBanner');
+      if (shouldStop) finishAuto();
+      else runNextAutoBet(seq);
+    }, 1200);
+  }
+}
+
+function updateAutoStats() {
+  document.getElementById('autoWins').textContent    = autoWins;
+  document.getElementById('autoLosses').textContent  = autoLosses;
+  document.getElementById('autoTies').textContent    = autoTies;
+
+  const remaining = autoTotalBets - autoBetsPlayed;
+  document.getElementById('autoCurrentRound').textContent =
+    autoBetsPlayed + ' / ' + autoTotalBets + ' (' + remaining + ' left)';
+
+  const netEl = document.getElementById('autoNetDisplay');
+  netEl.textContent = (autoNetProfit >= 0 ? '+' : '') + '$' + Math.abs(autoNetProfit).toFixed(2);
+  netEl.className   = 'payout-amount ' + (autoNetProfit >= 0 ? 'profit' : 'loss');
+
+  document.getElementById('autoBalanceLive').textContent = balance.toFixed(2);
+}
+
+function finishAuto() {
+  autoMode    = false;
+  // keep autoRunning = true so closeGameOver routes back to auto config
+  gameActive       = false;
+  waitingForChoice = false;
+  autoSeq++;        // kill any remaining callbacks
+  setChoiceButtons(false);
+
+  const won = autoNetProfit >= 0;
+  const overlay = document.getElementById('gameoverOverlay');
+  const box     = document.getElementById('gameoverBox');
+  box.className = `gameover-box ${won ? 'win-box' : 'lose-box'}`;
+  document.getElementById('gameoverIcon').textContent   = won ? '📊' : '📉';
+  document.getElementById('gameoverTitle').textContent  = 'Auto Complete';
+  document.getElementById('gameoverAmount').textContent =
+    (autoNetProfit >= 0 ? '+' : '-') + '$' + Math.abs(autoNetProfit).toFixed(2);
+  overlay.classList.add('show');
+}
+
+function resetAutoToConfig() {
+  autoMode    = false;
+  autoRunning = false;
+
+  const stopBtn = document.getElementById('stopAutoBtn');
+  if (stopBtn) { stopBtn.disabled = false; stopBtn.textContent = '⏹ Stop Auto'; }
+
+  document.getElementById('autoRunPanel').style.display    = 'none';
+  document.getElementById('autoConfigPanel').style.display = 'block';
+  document.getElementById('autoSidebarBalance').textContent = balance.toFixed(2);
+  setChoiceButtons(false);
+  buildBracket();
+  clearResultBanner('autoResultBanner');
+  resetPayoutBar();
+}
+
+// ─── Payout Bar ──────────────────────────────────────────────────────────────
+function updatePayoutBar(amount, mult, meta, isActive) {
+  const amountEl = document.getElementById('payoutBarAmount');
+  const metaEl   = document.getElementById('payoutBarMeta');
+  if (!amountEl || !metaEl) return;
+
+  const formatted = amount != null ? '$' + amount.toFixed(2) : '—';
+
+  // Pop animation — strip then reapply
+  amountEl.classList.remove('payout-pop', 'active');
+  void amountEl.offsetWidth;
+  amountEl.textContent = formatted;
+  if (isActive) {
+    amountEl.classList.add('active', 'payout-pop');
+  }
+
+  metaEl.textContent = meta || '';
+}
+
+function resetPayoutBar() {
+  const potAmt  = document.getElementById('payoutBarAmount');
+  const potMeta = document.getElementById('payoutBarMeta');
+  const curAmt  = document.getElementById('currentPayoutBar');
+  const curMeta = document.getElementById('currentMultBar');
+
+  if (potAmt)  { potAmt.textContent = '—';  potAmt.classList.remove('active', 'payout-pop'); }
+  if (potMeta) { potMeta.textContent = 'Place a bet to start'; }
+  if (curAmt)  { curAmt.textContent = '—';  curAmt.classList.remove('locked', 'active', 'payout-pop'); }
+  if (curMeta) { curMeta.textContent = 'No active bet'; }
+}
+
+// ─── Input Error Helpers ─────────────────────────────────────────────────────
+function showInputError(inputId, errorId, message) {
+  const input = document.getElementById(inputId);
+  const err   = document.getElementById(errorId);
+  if (!input || !err) return;
+
+  err.textContent = '⚠ ' + message;
+  err.classList.add('show');
+  input.classList.remove('input-shake', 'input-invalid');
+  // Force reflow so shake restarts if already showing
+  void input.offsetWidth;
+  input.classList.add('input-shake', 'input-invalid');
+  input.addEventListener('animationend', () => input.classList.remove('input-shake'), { once: true });
+}
+
+function clearInputError(inputId, errorId) {
+  const input = document.getElementById(inputId);
+  const err   = document.getElementById(errorId);
+  if (input) input.classList.remove('input-invalid', 'input-shake');
+  if (err)   err.classList.remove('show');
 }
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
